@@ -1,6 +1,5 @@
-name: OpenWrt Auto Mirror
+name: OpenWrt Auto Mirror (Heavy Duty)
 
-# यह स्क्रिप्ट तब चलेगी जब तू इसे मैनुअली बटन दबाकर चलाएगा
 on:
   workflow_dispatch: 
 
@@ -10,25 +9,33 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # पूरा इतिहास लोड करने के लिए ताकि पुश में दिक्कत न आए
 
-      - name: Download All 10000+ Packages (Base, Luci, Packages, etc)
+      - name: Download All 10000+ Packages
         run: |
-          echo "Starting download directly to GitHub servers..."
           CATEGORIES=("base" "luci" "packages" "routing" "telephony" "video")
           BASE_URL="https://downloads.openwrt.org/releases/25.12-SNAPSHOT/packages/aarch64_cortex-a53/"
-          
           for CAT in "${CATEGORIES[@]}"; do
             echo "Fetching $CAT..."
             wget -q -r -np -nH --cut-dirs=5 -R "index.html*" "${BASE_URL}${CAT}/" || true
           done
 
-      - name: Git Config
+      - name: Commit and Push in Batches
         run: |
           git config --global user.email "aashish@example.com"
           git config --global user.name "ctpt14378"
-
-      - name: Commit and Push to JRouter-Repo
-        run: |
-          git add .
-          git commit -m "Auto Update: OpenWrt Packages Full Backup" || echo "No changes to commit"
-          git push origin main
+          
+          # सभी नई फाइलों की लिस्ट बनाना
+          find . -type f -not -path '*/.*' > file_list.txt
+          
+          # 400-400 फाइलों के टुकड़ों में अपलोड करना
+          BATCH_SIZE=400
+          total_lines=$(wc -l < file_list.txt)
+          
+          for ((i=1; i<=total_lines; i+=BATCH_SIZE)); do
+            echo "--- Uploading Batch: $i to $((i+BATCH_SIZE-1)) ---"
+            sed -n "${i},$((i+BATCH_SIZE-1))p" file_list.txt | xargs -d '\n' git add
+            git commit -m "Update Batch $i" || continue
+            git push origin main || (sleep 10 && git push origin main)
+          done
